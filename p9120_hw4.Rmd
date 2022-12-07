@@ -1,0 +1,174 @@
+---
+title: "P9120 HW4"
+output: html_document
+date: '2022-12-07'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+library(Matrix)
+library(glmnet)
+library(keras)
+library(jpeg)
+library(tidyverse)
+```
+
+## Exercise 8
+
+From your collection of personal photographs, pick 10 images of animals (such as dogs, cats, birds, farm animals, etc.). If the subject does not occupy a reasonable part of the image, then crop the image. Now use a pretrained image classification CNN as in Lab 10.9.4 to predict the class of each of your images, and report the probabilities for the top five predicted classes for each image.
+
+Construct the Pretrained CNN model:
+
+```{r}
+img_dir <- "book_images"
+image_names <- list.files(img_dir)
+image_names
+num_images <- length(image_names)
+x <- array(dim = c(num_images, 224, 224, 3)) 
+
+for (i in 1:num_images) {
+  img_path <- paste(img_dir, image_names[i], sep = "/") 
+  img <- image_load(img_path, target_size = c(224, 224))
+  x[i,,, ] <- image_to_array(img)
+}
+
+```
+
+Look at the 10 images:
+
+```{r}
+par(mar = c(0, 0, 0, 0), mfrow = c(2, 5))
+x_temp <- x / 255
+for (i in 1:10) plot(as.raster(x_temp[i,,, ]))
+```
+
+Preprocess the image:
+
+```{r}
+x <- imagenet_preprocess_input(x)
+```
+
+Load the Pretrained Model：
+
+```{r}
+model <- application_resnet50(weights = "imagenet") 
+summary(model)
+```
+
+Print the top 5 prediction
+
+```{r}
+pred10 <- model %>% predict(x) %>%
+  imagenet_decode_predictions(top = 5) 
+names(pred10) <- image_names
+print(pred10)
+```
+
+The prediction is generally correct. From the above we know that the background of the image may have an impact on the prediction. e.g. the last image is actually a white swan in a dark background. 
+
+## Exercise 13
+
+On the book website, www.statlearning.com, there is a gene expression data set (Ch12Ex13.csv) that consists of 40 tissue samples with measurements on 1,000 genes. The first 20 samples are from healthy patients, while the second 20 are from a diseased group.
+
+(a)  Load in the data using `read.csv()`. You will need to select `header = F`.
+
+```{r }
+set.seed(1)
+df <- read.csv("Ch12Ex13.csv", header = FALSE)
+head(df)
+```
+The 40 columns represent 40 patients, and the rows are different genes.
+
+(b) Apply hierarchical clustering to the samples using correlation-based distance, and plot the dendrogram. Do the genes separate the samples into the two groups? Do your results depend on the type of linkage used?
+
+We are using correlation-based distance as the dissimilarity measure
+```{r}
+set.seed(2022)
+corrplot::corrplot(cor(df), method = 'color', 
+         order = 'hclust', hclust.method = 'complete', 
+         tl.col = 'black', tl.cex = 0.7)
+dists <- as.dist(1 - cor(df))
+```
+
+Try with different linkages:
+```{r}
+methods <- c('centroid', 'average', 'single', 'complete')
+set.seed(2022)
+par(mfrow = c(2,2))
+for (method in methods) {
+    clusts <- hclust(dists, method = method)
+    
+    plot(clusts, 
+         col = "light blue",
+         lwd = 3, lty = 1, 
+         sub = "", hang = -1, 
+         axes = FALSE,
+         main = paste0('Cluster Dendrogram using ', method, ' linkage'))
+}
+```
+
+All the clustering results are different. The centroid, complete and single linkage methods all separate the patients into 2 main clusters. However, the average linkage method sepearate the patients into 3 main clusters.
+
+We see that the first 20 patients are clustered into 1 group and the last 20 are clustered into the second group, consistent with our knowledge.
+
+(c) Your collaborator wants to know which genes differ the most across the two groups. Suggest a way to answer this question, and apply it here.
+
+I believe we can use PCA to find the genes differ the most across the two groups:
+
+1. Perform PCA on the dataset
+
+2. For the first two principle components, perform K-Means clustering and make plots to see if there is good separation on those components.
+
+3. If there is such separation we will test to see if one group of genes is the one we are looking for.
+
+```{r}
+set.seed(2022)
+require(ggbiplot); require(ggthemes)
+# Perform PCA
+df.pca <- prcomp(df)
+summary(df.pca)
+
+pca_2 <- df.pca$x %>%
+    as_tibble() %>%
+    dplyr::select(PC1, PC2)
+
+# Perform k-means
+pca_kmeans <- pca_2 %>%
+    kmeans(centers = 2)
+
+ggbiplot::ggbiplot(df.pca, groups = factor(pca_kmeans$cluster), 
+         ellipse = TRUE) +
+    geom_point(aes(col = factor(pca_kmeans$cluster)), 
+               size = 2, alpha = 0.2) +
+    theme(legend.position = 'top') +
+    scale_color_manual(name = 'K-Means Group of Patient',
+                       values = c('#a6cee3', '#e31a1c')) +
+    ggtitle('K-Means Clustering of First Two Principal Components')
+```
+
+Checking the result with k-means, we know that the patients are clearly separated into two groups by the first component.
+
+Now we can see which variables correlate most strongly with the first factor:
+
+```{r}
+strong_genes1 <- df %>%
+    dplyr::mutate(Variable = paste0('Gene ', row_number())) %>%
+    filter(pca_kmeans$cluster == 2) %>%
+    select(Variable)
+
+strong_genes1 %>% knitr::kable()
+```
+
+The genes in the table above are the ones that vary most between the two groups of patients.
+
+```{r}
+set.seed(702)
+gl <- apply(pr.gene$rotation, 1, sum)
+gl.dif <- order(abs(gl), decreasing=T)
+top15 <- gl.dif[1:15]
+top15
+```
+
+
+
+

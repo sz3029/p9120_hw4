@@ -11,6 +11,7 @@ library(glmnet)
 library(keras)
 library(jpeg)
 library(tidyverse)
+library(ggthemes)
 ```
 
 ## Exercise 8
@@ -113,7 +114,7 @@ We see that the first 20 patients are clustered into 1 group and the last 20 are
 
 (c) Your collaborator wants to know which genes differ the most across the two groups. Suggest a way to answer this question, and apply it here.
 
-I believe we can use PCA to find the genes differ the most across the two groups:
+I believe we can use PCA to find the genes differ the most across the two patients groups:
 
 1. Perform PCA on the dataset
 
@@ -121,21 +122,28 @@ I believe we can use PCA to find the genes differ the most across the two groups
 
 3. If there is such separation we will test to see if one group of genes is the one we are looking for.
 
+4. Similarly, perform PCA on the transposed dataset on genes (genes as columns)
+
+5. Check if the samples are well-separated into two main groups for the first two components using k-means
+
+6. If they are well-separated, the genes in the well separated components are most likely correlate with the genes of interest
+
+7. We find the genes in common between step 3 and 6. Those genes are likely to be the most different genes between the two groups.
+
+### Patients as variables
+
 ```{r}
 set.seed(2022)
 require(ggbiplot); require(ggthemes)
 # Perform PCA
 df.pca <- prcomp(df)
 summary(df.pca)
-
 pca_2 <- df.pca$x %>%
     as_tibble() %>%
     dplyr::select(PC1, PC2)
-
 # Perform k-means
 pca_kmeans <- pca_2 %>%
     kmeans(centers = 2)
-
 ggbiplot::ggbiplot(df.pca, groups = factor(pca_kmeans$cluster), 
          ellipse = TRUE) +
     geom_point(aes(col = factor(pca_kmeans$cluster)), 
@@ -159,14 +167,73 @@ strong_genes1 <- df %>%
 strong_genes1 %>% knitr::kable()
 ```
 
-The genes in the table above are the ones that vary most between the two groups of patients.
+There are `r nrow(strong_genes1)` genes that are important. Now we look at the PCA with the genes:
 
 ```{r}
-set.seed(702)
-gl <- apply(pr.gene$rotation, 1, sum)
-gl.dif <- order(abs(gl), decreasing=T)
-top15 <- gl.dif[1:15]
-top15
+# tranpose the dataframe
+gene_df <- df %>%
+    t %>%
+    as.tibble
+names(gene_df) <- paste0('Gene', 1:1000)
+```
+
+### Genes as variables
+
+Perform the PCA and plot the k-means plot:
+
+```{r}
+set.seed(2022)
+
+df.pca <- prcomp(gene_df)
+
+gene_pca_2 <- df.pca$x %>%
+    as.tibble %>%
+    select(PC1, PC2)
+
+gene_pca_kmeans <- gene_pca_2 %>%
+    kmeans(centers = 2)
+
+gene_df <- gene_df %>%
+    mutate(Patient = paste0('V',1:40))
+
+ggbiplot(df.pca, groups = factor(gene_pca_kmeans$cluster), 
+         ellipse = TRUE, var.axes = FALSE, labels = gene_df$Patient,
+         labels.size = 5) +
+    geom_point(aes(col = factor(gene_pca_kmeans$cluster)), 
+               size = 2, alpha = 0.2) +
+    theme(legend.position = 'top') +
+    scale_color_manual(name = 'K-Means Group of Patient',
+                       values = c('#a6cee3', '#e31a1c')) +
+    ggtitle('K-Means Clustering of First Two Principal Components')
+```
+
+Checking the result with k-means, we know that the patients are clearly separated into two groups by the first component.
+They are likely to represent the diseased and non-diseased populations.
+
+We then select the genes in common
+
+```{r}
+strong_genes2 <- df.pca$rotation %>%
+    as.tibble %>%
+    select(PC1) %>%
+    mutate(Variable = paste0('Gene ', 1:1000)) %>%
+    arrange(desc(abs(PC1))) %>%
+    select(Variable) %>%
+    head(110)
+```
+
+
+```{r}
+common_genes <- strong_genes1 %>%
+    inner_join(strong_genes2)
+
+nrow(common_genes)
+```
+
+They perfectly overlapped. The 110 genes are likely to be the ones we are looking for. Arranged descending by the difference, they are:
+
+```{r}
+strong_genes2 %>% knitr::kable()
 ```
 
 
